@@ -1,0 +1,6 @@
+id: n4uxgs54o2rnnx16sobuaar9tq7zbarpxlo35nadzho9p9r5
+name: globlin
+main: src/glob.zig
+license: MIT
+description: A fast pathname matcher
+dependencies:
