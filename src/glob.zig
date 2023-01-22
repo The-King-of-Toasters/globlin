@@ -85,8 +85,35 @@ const BraceStack = struct {
     }
 };
 
-// This algorithm is based on https://research.swtch.com/glob
+/// This function checks returns a boolean value if the pathname `path` matches
+/// the pattern `glob`.
+///
+/// The supported pattern syntax for `glob` is:
+///
+/// "?"
+///     Matches any single character.
+/// "*"
+///     Matches zero or more characters, except for path separators ('/' or '\').
+/// "**"
+///     Matches zero or more characters, including path separators.
+///     Must match a complete path segment, i.e. followed by a path separator or
+///     at the end of the pattern.
+/// "[ab]"
+///     Matches one of the characters contained in the brackets.
+///     Character ranges (e.g. "[a-z]") are also supported.
+///     Use "[!ab]" or "[^ab]" to match any character *except* those contained
+///     in the brackets.
+/// "{a,b}"
+///     Match one of the patterns contained in the braces.
+///     Any of the wildcards listed above can be used in the sub patterns.
+///     Braces may be nested up to 10 levels deep.
+/// "!"
+///     Negates the result when at the start of the pattern.
+///     Multiple "!" characters negate the pattern multiple times.
+/// "\"
+///     Used to escape any of the special characters above.
 pub fn match(glob: []const u8, path: []const u8) bool {
+    // This algorithm is based on https://research.swtch.com/glob
     var state = State{};
     // Store the state when we see an opening '{' brace in a stack.
     // Up to 10 nested braces are supported.
