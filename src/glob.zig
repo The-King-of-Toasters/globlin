@@ -1,4 +1,6 @@
 const std = @import("std");
+const math = std.math;
+const mem = std.mem;
 const expect = std.testing.expect;
 
 // These store character indices into the glob and path strings.
@@ -16,7 +18,7 @@ const Wildcard = struct {
 
 const BraceState = enum { Invalid, Comma, EndBrace };
 
-inline fn skipBraces(self: *State, glob: []const u8, stop_on_comma: bool) BraceState {
+fn skipBraces(self: *State, glob: []const u8, stop_on_comma: bool) BraceState {
     var braces: u32 = 1;
     var in_brackets = false;
     while (self.glob_index < glob.len and braces > 0) : (self.glob_index += 1) {
@@ -55,7 +57,8 @@ inline fn backtrack(self: *State) void {
 const State = @This();
 const BraceStack = struct {
     stack: [10]State = undefined,
-    len: usize = 0,
+    len: u32 = 0,
+    longest_brace_match: u32 = 0,
 
     inline fn push(self: *BraceStack, state: *const State) State {
         self.stack[self.len] = state.*;
@@ -66,22 +69,22 @@ const BraceStack = struct {
         };
     }
 
-    inline fn pop(
-        self: *BraceStack,
-        state: *const State,
-        longest_brace_match: *usize,
-    ) State {
+    inline fn pop(self: *BraceStack, state: *const State) State {
         self.len -= 1;
         const s = State{
             .glob_index = state.glob_index,
-            .path_index = longest_brace_match.*,
+            .path_index = self.longest_brace_match,
             // Restore star state if needed later.
             .wildcard = self.stack[self.len].wildcard,
             .globstar = self.stack[self.len].globstar,
         };
         if (self.len == 0)
-            longest_brace_match.* = 0;
+            self.longest_brace_match = 0;
         return s;
+    }
+
+    inline fn last(self: *const BraceStack) *const State {
+        return &self.stack[self.len - 1];
     }
 };
 
@@ -118,7 +121,6 @@ pub fn match(glob: []const u8, path: []const u8) bool {
     // Store the state when we see an opening '{' brace in a stack.
     // Up to 10 nested braces are supported.
     var brace_stack = BraceStack{};
-    var longest_brace_match: usize = 0;
 
     // First, check if the pattern is negated with a leading '!' character.
     // Multiple negations can occur.
@@ -220,11 +222,9 @@ pub fn match(glob: []const u8, path: []const u8) bool {
                     }
 
                     // Try each range.
-                    const start = state.glob_index;
+                    var first = true;
                     var is_match = false;
-                    while (state.glob_index < glob.len and
-                        (state.glob_index == start or glob[state.glob_index] != ']'))
-                    {
+                    while (state.glob_index < glob.len and (first or glob[state.glob_index] != ']')) {
                         var low = glob[state.glob_index];
                         if (!unescape(&low, glob, &state.glob_index))
                             return false; // Invalid pattern
@@ -245,8 +245,9 @@ pub fn match(glob: []const u8, path: []const u8) bool {
 
                         if (low <= c and c <= high)
                             is_match = true;
+                        first = false;
                     }
-                    if (state.glob_index >= glob.len or glob[state.glob_index] != ']')
+                    if (state.glob_index >= glob.len)
                         return false; // Invalid pattern!
                     state.glob_index += 1;
                     if (is_match != class_negated) {
@@ -264,16 +265,18 @@ pub fn match(glob: []const u8, path: []const u8) bool {
                 },
                 '}' => if (brace_stack.len > 0) {
                     // If we hit the end of the braces, we matched the last option.
-                    longest_brace_match = std.math.max(longest_brace_match, state.path_index);
+                    brace_stack.longest_brace_match =
+                        math.max(brace_stack.longest_brace_match, @intCast(u32, state.path_index));
                     state.glob_index += 1;
-                    state = brace_stack.pop(&state, &longest_brace_match);
+                    state = brace_stack.pop(&state);
                     continue;
                 },
                 ',' => if (brace_stack.len > 0) {
                     // If we hit a comma, we matched one of the options!
                     // But we still need to check the others in case there is a longer match.
-                    longest_brace_match = std.math.max(longest_brace_match, state.path_index);
-                    state.path_index = brace_stack.stack[brace_stack.len - 1].path_index;
+                    brace_stack.longest_brace_match =
+                        math.max(brace_stack.longest_brace_match, @intCast(u32, state.path_index));
+                    state.path_index = brace_stack.last().path_index;
                     state.glob_index += 1;
                     state.wildcard = Wildcard{};
                     state.globstar = Wildcard{};
@@ -287,12 +290,11 @@ pub fn match(glob: []const u8, path: []const u8) bool {
 
                     if (path[state.path_index] == cc) {
                         if (brace_stack.len > 0 and
-                            state.wildcard.path_index > 0 and
                             state.glob_index > 0 and
                             glob[state.glob_index - 1] == '}')
                         {
-                            longest_brace_match = state.path_index;
-                            state = brace_stack.pop(&state, &longest_brace_match);
+                            brace_stack.longest_brace_match = @intCast(u32, state.path_index);
+                            state = brace_stack.pop(&state);
                         }
                         state.glob_index += 1;
                         state.path_index += 1;
@@ -317,7 +319,7 @@ pub fn match(glob: []const u8, path: []const u8) bool {
             switch (state.skipBraces(glob, true)) {
                 .Invalid => return false,
                 .Comma => {
-                    state.path_index = brace_stack.stack[brace_stack.len - 1].path_index;
+                    state.path_index = brace_stack.last().path_index;
                     continue;
                 },
                 .EndBrace => {},
@@ -325,13 +327,13 @@ pub fn match(glob: []const u8, path: []const u8) bool {
 
             // Hit the end. Pop the stack.
             // If we matched a previous option, use that.
-            if (longest_brace_match > 0) {
-                state = brace_stack.pop(&state, &longest_brace_match);
+            if (brace_stack.longest_brace_match > 0) {
+                state = brace_stack.pop(&state);
                 continue;
             } else {
                 // Didn't match. Restore state, and check if we need to jump back to a star pattern.
+                state = brace_stack.last().*;
                 brace_stack.len -= 1;
-                state = brace_stack.stack[brace_stack.len];
                 if (state.wildcard.path_index > 0 and state.wildcard.path_index <= path.len) {
                     state.backtrack();
                     continue;
