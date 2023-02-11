@@ -288,7 +288,12 @@ pub fn match(glob: []const u8, path: []const u8) bool {
                     if (!unescape(&cc, glob, &state.glob_index))
                         return false; // Invalid pattern;
 
-                    if (path[state.path_index] == cc) {
+                    const is_match = if (cc == '/')
+                        isSeparator(path[state.path_index])
+                    else
+                        path[state.path_index] == cc;
+
+                    if (is_match) {
                         if (brace_stack.len > 0 and
                             state.glob_index > 0 and
                             glob[state.glob_index - 1] == '}')
