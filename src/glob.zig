@@ -1,5 +1,4 @@
 const std = @import("std");
-const math = std.math;
 const mem = std.mem;
 const expect = std.testing.expect;
 
@@ -142,8 +141,8 @@ pub fn match(glob: []const u8, path: []const u8) bool {
                         state.glob_index = skipGlobstars(glob, &index) - 2;
                     }
 
-                    state.wildcard.glob_index = @intCast(u32, state.glob_index);
-                    state.wildcard.path_index = @intCast(u32, state.path_index + 1);
+                    state.wildcard.glob_index = @intCast(state.glob_index);
+                    state.wildcard.path_index = @intCast(state.path_index + 1);
 
                     // ** allows path separators, whereas * does not.
                     // However, ** must be a full path component, i.e. a/**/b not a**b.
@@ -266,7 +265,7 @@ pub fn match(glob: []const u8, path: []const u8) bool {
                 '}' => if (brace_stack.len > 0) {
                     // If we hit the end of the braces, we matched the last option.
                     brace_stack.longest_brace_match =
-                        math.max(brace_stack.longest_brace_match, @intCast(u32, state.path_index));
+                        @max(brace_stack.longest_brace_match, @as(u32, @intCast(state.path_index)));
                     state.glob_index += 1;
                     state = brace_stack.pop(&state);
                     continue;
@@ -275,7 +274,7 @@ pub fn match(glob: []const u8, path: []const u8) bool {
                     // If we hit a comma, we matched one of the options!
                     // But we still need to check the others in case there is a longer match.
                     brace_stack.longest_brace_match =
-                        math.max(brace_stack.longest_brace_match, @intCast(u32, state.path_index));
+                        @max(brace_stack.longest_brace_match, @as(u32, @intCast(state.path_index)));
                     state.path_index = brace_stack.last().path_index;
                     state.glob_index += 1;
                     state.wildcard = Wildcard{};
@@ -298,7 +297,7 @@ pub fn match(glob: []const u8, path: []const u8) bool {
                             state.glob_index > 0 and
                             glob[state.glob_index - 1] == '}')
                         {
-                            brace_stack.longest_brace_match = @intCast(u32, state.path_index);
+                            brace_stack.longest_brace_match = @intCast(state.path_index);
                             state = brace_stack.pop(&state);
                         }
                         state.glob_index += 1;
@@ -378,7 +377,7 @@ inline fn unescape(c: *u8, glob: []const u8, glob_index: *usize) bool {
 inline fn skipGlobstars(glob: []const u8, glob_index: *usize) usize {
     // Coalesce multiple ** segments into one.
     while (glob_index.* + 3 <= glob.len and
-        std.mem.eql(u8, glob[glob_index.*..][0..3], "/**"))
+        mem.eql(u8, glob[glob_index.*..][0..3], "/**"))
     {
         glob_index.* += 3;
     }
